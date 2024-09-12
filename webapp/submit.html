@@ -1,0 +1,131 @@
+<% extends "master.html" %>
+
+<% block title %>submit <{ app.display_name }> job<% endblock %>
+
+<% block style %>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.18.0/axios.min.js"></script>
+<script src="https://unpkg.com/ngl@2.0.0-dev.37" type="text/javascript"></script>
+<% endblock %>
+
+
+<% block content %>
+
+<% include 'components/pdb-file-input-2.html' %>
+<% include 'components/pdb-files-input.html' %>
+<% include 'components/ngl-viewer.html' %>
+<% include 'components/submit-job-widget.html' %>
+<% include 'components/app-description.html' %>
+
+
+<div id="app" v-cloak>
+    <br/>
+
+    <h1>Submit <{ app.display_name }> Job</h1>
+
+    <br/>
+
+    <app-description :app="app"></app-description>
+
+    <br/>
+    <label for="pdb-files-to-put">Input PDB file(s).</label>
+    <pdb-files-input
+        id="pdb-files-to-put"
+        placeholder="Drag and Drop PDB files to predict CCS with PARCS. A maximum of 100 PDB files are allowed."
+        v-model="input_files"
+        size="normal"
+        :max="100"
+        >
+    </pdb-files-input>
+    <br/>
+    <label for="rand-rot">Input number of random rotations. Minimum: 100, Maximum: 1000, Default: 300.</label>
+    <b-form-input 
+        id="rand-rot" 
+        type="number" :min="100" :max="1000" size="normal" 
+        placeholder="Enter number of Random Rotations (integers only)" 
+        v-model="number_of_random_rotations"
+        :min="100" 
+        :max="1000" 
+        size="normal"
+        >
+    </b-form-input>
+    <br/>
+    <label for="probe-rad">Input probe radius in Angstrom. He buffer gas: 1.0 (default), N<sub>2</sub> buffer gas: 1.81.</label>
+    <b-form-input 
+        id="probe-rad"
+        type="number" 
+        size="normal" 
+        placeholder="Enter probe radius." 
+        v-model="probe_radius">
+    </b-form-input>
+    <br/>
+
+    <submit-job-widget :job="job" :files="files" :enabled="Boolean(input_files.length)">
+    </submit-job-widget>
+
+
+</div> <!-- app -->
+
+<script type="module">
+    'use strict';
+
+    window.app = new Vue({
+        el: '#app',
+        data: {
+            app: <{ app | tojson }>,
+            input_files: [],
+            number_of_random_rotations: '300',
+            probe_radius: '1.0',
+        },
+
+        computed: {
+            job() {
+                return {
+                    app: this.app.name,
+                    steps: [
+                        {
+                            name: 'parcs_ccs_calc',
+                            application: 'parcs_ccs_calc',
+                            flags: '' +
+                                `#rosie type serial \n` +
+                                `-out:file:o CCS_default.txt \n` +
+                                `-ccs_prad ${this.probe_radius} \n` + 
+                                `-ccs_nrots ${this.number_of_random_rotations} \n` + 
+                                `-in:file:s ` +  this.input_files.map(this.input_file_name).join(' ') + `\n` +
+                                `\n`,
+                            state: 'queued',
+                        },
+                    ],
+                };
+            },
+
+            files() {
+                let r = {};
+                let name_map = {};
+
+                for(let f of this.input_files) {
+                    let name = this.input_file_name(f);
+                    name_map[name] = f.name;
+                    r[name] = f.data;
+                }
+
+                r['options.json'] = JSON.stringify( {
+                    app: this.app.name,
+                    name_map: name_map,
+                });
+                return r;
+            },
+        },
+
+        methods: {
+            input_file_name(file) {
+                return `input-${this.input_files.indexOf(file)}.pdb`;
+            },
+        },
+
+
+    });
+
+</script>
+
+
+<% endblock %>

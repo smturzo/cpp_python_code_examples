@@ -1,0 +1,89 @@
+<% extends "master.html" %>
+
+<% block title %><{ app.display_name }> job<% endblock %>
+
+<% block style %>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.18.0/axios.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-1.55.2.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+<script src="<{ url_for_static(filename='js/external/FileSaver.min.js') }>"></script>
+<script src="<{ url_for_static(filename='js/external/jszip.min.js') }>"></script>
+<script src="https://unpkg.com/ngl@2.0.0-dev.37" type="text/javascript"></script>
+<% endblock %>
+
+
+<% block content %>
+
+<% include 'components/job-header-viewer.html' %>
+<% include 'components/job.html' %>
+<% include 'components/job-file-downloader.html' %>
+<% include 'components/job-file-viewer.html' %>
+<% include 'apps/parcs-ccs-calc/ccs-file-viewer.html' %>
+<% include 'components/citations.html' %>
+
+<div id="app" v-cloak>
+    <br/>
+    <job-header-viewer :job="job"></job-header-viewer>
+
+    <template v-if="job.job_id">
+        <ccs-file-viewer :score-data="score_data"></ccs-file-viewer>
+        <br/>
+        <job-file-viewer :job="job"></job-file-viewer>
+        <br/>
+        <br/>
+        <citations :app="app.name" ></citations>
+    </template>
+    <br/><br/>
+</div>
+
+<script type="module">
+    // This script here reads the CCS_default.txt file on the server, gets the data, changes the name back to orignal file names and sends it the viewl page.
+    // The view page will show table, button to download result, button to copy result to clipboard.
+    'use strict';
+
+    window.app = new Vue({
+        el: '#app',
+        data: {
+            app: <{ app | tojson }>,
+            job_id: <{ job_id | tojson }>,
+            job: {},
+            score_file: null,
+        },
+        props: {
+        },
+
+        beforeMount: async function () {
+            this.job = await new Job(this.job_id);
+            this.score_file = this.job.get_output_file('CCS_default.txt');
+        },
+
+        computed: {
+            options() {
+                const data = this.job.get_input_file('options.json').data;
+                if(data) return JSON.parse(data);
+                else return {};
+            },
+            score_data() {
+                if( this.score_file && this.score_file.data && this.options && this.options.name_map ) {
+                    let r = this.score_file.data;
+                    console.log('score_data: oringinal score_file:', r);
+
+                    for(const [key, value] of Object.entries(this.options.name_map) ) {
+                        r = r.replace(key.slice(0, -4), value.slice(0, -4));
+                    }
+                    console.log('score_data: score_file:', r);
+                    return r;
+                }
+                else return null;
+            },
+        },
+
+        methods: {
+        },
+
+    });
+
+</script>
+
+
+<% endblock %>

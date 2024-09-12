@@ -1,0 +1,144 @@
+<% block style %>
+	<style>
+		table {
+			font-family: arial, sans-serif;
+			border-collapse: collapse;
+			width: 100%;
+		}
+
+		td, th {
+			border: 1px solid #dddddd;
+			text-align: left;
+			padding: 8px;
+		}
+
+		tr:nth-child(even) {
+			background-color: #dddddd;
+		}
+	</style>
+<% endblock %>
+
+<template id="ccs-file-viewer-template">
+
+<div v-if="parsed_data">
+    <div class="d-inline-flex p-2 bd-highlight w-100">
+        <b-form>
+            <a class="btn btn-primary" href="#" @click="downloadResults">Download Results</a>
+        </b-form>
+        <template v-if="file">
+            &nbsp; &nbsp; &nbsp; &nbsp;
+            <a :href="file.file_viewer_url()" target="blank" style="color:#446;">{{file.name}} <i class="fas fa-external-link-square-alt"></i></a>
+            &nbsp;
+            <a :href="file.file_data_url()" download style="color:#000;"><i class="fas fa-download"></i></a>
+        </template>
+        &nbsp; &nbsp; &nbsp; &nbsp;
+        <button @click="copyTableToClipboard">Copy Table To Clipboard</button>
+    </div>
+
+    <table>
+        <tr>
+            <th>File Name </th>
+            <th>CCS Value (Angstroms)</th>
+        </tr>
+        <tr v-for="(item, index) in items" :key="index">
+            <td>{{ item }}</td>
+            <td>{{ fields[index] }}</td>      
+        </tr>    
+    </table>
+</div>
+</template>
+
+
+<script type="module">
+'use strict';
+
+Vue.component('ccs-file-viewer', {
+    template: '#ccs-file-viewer-template',
+
+    props: {
+        file: {
+            required: false,
+        },
+        scoreData: {
+            type: String,
+            required: false,
+        },
+
+    },
+    data: function () {
+        return {
+            view_as_table: true,
+        };
+    },
+
+    mounted() {
+        console.log('this.scoreData:', this.scoreData);
+        if(this.file) this.file.download_data();
+    },
+
+    computed: {
+        parsed_data() {
+            if(this.file && this.file.data) {
+                console.log('ccs-file-viewer: getting parsed data from supplied file...');
+                return this.parse_score_file(this.file.data);
+            }
+            if(this.scoreData) {
+                console.log('ccs-file-viewer: getting parsed data from supplied score-data...');
+                return this.parse_score_file(this.scoreData);
+            }
+        },
+
+    items() {
+            return this.parsed_data.score_table;
+
+        },
+
+    fields() {
+        return this.parsed_data.score_table_keys;
+        },
+    },
+
+
+    methods: {
+        parse_score_file(data) {
+
+            let score_table_keys = [];
+            let score_table = [];
+
+            if(data) {
+            const lines = data.split('\n').splice(1);
+
+                if( lines.length > 0 ) {
+                    for(let line of lines) {
+                        if(line.length > 0) {
+                            const ccs_line_split = line.split('\t');
+                            const ccs_file_name  = ccs_line_split[0];
+                            const ccs_file_value = ccs_line_split[1];
+                            score_table_keys.push(ccs_file_name);
+                            score_table.push(ccs_file_value);
+                        }
+                    }
+                }
+            }
+
+            return {score_table_keys: score_table, score_table: score_table_keys};
+        },
+        downloadResults() {
+            const data = this.scoreData;
+            saveAs(new Blob([data], {type: "text/plain;charset=utf-8"}), 'results.txt');
+        },
+        copyTableToClipboard() {
+            const table = this.$el.querySelector('table');
+            const range = document.createRange();
+            range.selectNodeContents(table);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+            document.execCommand('copy');
+            selection.removeAllRanges();
+        },
+    },
+
+});
+
+</script>

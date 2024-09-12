@@ -1,0 +1,80 @@
+<% extends "master.html" %>
+
+<% block title %><{ app.display_name }> documentation<% endblock %>
+
+<% block style %>
+<% endblock %>
+
+
+<% block content %>
+
+
+<% include 'components/citations.html' %> <!-- Citation widget included here -->
+
+<div id="app" v-cloak>
+    <div>
+        <h1><{ app.display_name }> app documentation</h1>
+
+        <div align="left">
+            <img src="<{ url_for_static('apps/'+app.name+'/icon.png') }>" width="128" height="128" style="float:right">
+            <br/>
+            <p>This app executes Rosetta Projection Approximation using Rough Circular Shapes (PARCS) on a given PDB file. Input file can be downloaded from pdb.org or uploaded by user.
+            </p>
+            Rosetta command line used in this app: <span class="fixed">parcs_ccs_calc -in:file:s input.pdb</span>.
+            <br/>
+            <p>This app is the ROSIE interface to parcs-ccs-calc, which predicts the rotationally averaged collision cross section (CCS, as generally determined from ion mobility mass spectrometry experiments) for any protein structure.
+            </p>
+            </br>
+            <p><strong>PARCS routine</strong></p>
+            <p>PARCS calculates the CCS of a protein structure file in three stages:</p> 
+            <p><strong>1.</strong> It randomly rotates the structure.</p> 
+            <p><strong>2.</strong> It projects the structure onto a 2D grid in the xy, xz and the yz planes.</p> 
+            <p><strong>3.</strong> It calculates the area of the projections from the grids. These three steps are repeated for N random rotations (default is 300).</p> 
+            <p>Subsequently, the projection area is averaged (across 3N random rotations) to get the predicted CCS.</p> 
+            <br/>
+            <p><strong>PARCS usage information</strong> </p>
+            <p>To use PARCS to predict the CCS of given structure(s), users need to provide the input structure for which the CCS value is going to be predicted.</p> 
+            <p>The input protein structure file needs to be in <strong>PDB</strong> format. Users also have the option to submit <strong>multiple</strong> PDB files.</p> 
+            <p>By default, the CCS value is predicted with the helium buffer gas probe radius (1.0 Å). This can be changed to nitrogen buffer gas probe radius of 1.81 Å.</p>
+            <p>By default, 300 random rotations are used to calculate the CCS (i.e. 600 projections). Users can increase this value, although our study show that it is usually not necessary.</p> 
+            <br/>
+            <p><strong>Tips:</strong></p>
+            <p><strong>1.</strong> PARCS has only been tested and benchmarked on proteins.</p>
+            <p><strong>2.</strong> For protein complexes it is suggested to use a larger number of random rotations.</p>
+            <p><strong>3.</strong> Do not use PARCS for CCS calculation on small molecules.</p>
+            <p><strong>4.</strong> Pre-process the protein structure file (PDB only) such that hetero atoms (ligand or water) are removed.</p>
+            <p><strong>5.</strong> DO NOT submit PDB files in a MS Word Document.</p>
+            <p><strong>6.</strong> PARCS has not been tested on DNA, RNA, protein-DNA complexes or protein-RNA complexes.</p>
+            <p><strong>7.</strong> Although not required, users may want to relax the structure with Rosetta prior to PARCS calculation.</p>
+            <p><strong>8.</strong> If the user has a number of proteins for which the CCS needs to be predicted in different buffer gas conditions (helium and/or nitrogen), then please submit these as separate jobs and change the probe radius accordingly (1.81 Angstroms for nitrogen buffer gas). Probe radius for other buffer gases has not been tested.</p>
+            <p><strong>9.</strong> For each structure PARCS calculation usually takes about a few seconds.</p>
+            <br/>
+            <p><strong>Interpreting results:</strong></p>
+            <p>The output of the file is a text file containing the structure file name and the associated CCS value predicted by PARCS. All CCS values are predicted in Å².</p>
+            </p>
+            The result file will be avalible as <span class="fixed">CCS_default.txt</span>.
+            <br/>
+            <br/>
+            <br/>
+            <br/>
+        </div>
+
+
+    </div>
+    <citations :app="app.name" ></citations> <!-- Citation added here -->
+</div>
+
+<script type="module">
+    'use strict';
+
+    window.app = new Vue({
+        el: '#app',
+        data: {
+            app: <{ app | tojson }>,
+        },
+
+    });
+
+</script>
+
+<% endblock %>
