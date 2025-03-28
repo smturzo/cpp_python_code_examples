@@ -229,8 +229,6 @@ def read_params(filename):
     The resulting `params` object will contain parameters from all listed files.
 
     """
-    import os
-
     # Check if the input file exists
     if not os.path.isfile(filename):
         raise FileNotFoundError(f"The file '{filename}' was not found.")
@@ -264,19 +262,21 @@ def read_params(filename):
 
     return params
 
-
-def read_box(psf, filename):
-    try:
-        sysinfo = json.load(open(filename, 'r'))
-        boxlx, boxly, boxlz = map(float, sysinfo['dimensions'][:3])
-    except:
-        for line in open(filename, 'r'):
-            segments = line.split('=')
-            if segments[0].strip() == "BOXLX": boxlx = float(segments[1])
-            if segments[0].strip() == "BOXLY": boxly = float(segments[1])
-            if segments[0].strip() == "BOXLZ": boxlz = float(segments[1])
-    psf.setBox(boxlx*angstroms, boxly*angstroms, boxlz*angstroms)
-    return psf
+# This function obtained from Charmm-Guii is ignored
+# Because here we are generating the PBC box ourselves
+# In the next function gen_box
+#def read_box(psf, filename):
+#    try:
+#        sysinfo = json.load(open(filename, 'r'))
+#        boxlx, boxly, boxlz = map(float, sysinfo['dimensions'][:3])
+#    except:
+#        for line in open(filename, 'r'):
+#            segments = line.split('=')
+#            if segments[0].strip() == "BOXLX": boxlx = float(segments[1])
+#            if segments[0].strip() == "BOXLY": boxly = float(segments[1])
+#            if segments[0].strip() == "BOXLZ": boxlz = float(segments[1])
+#    psf.setBox(boxlx*angstroms, boxly*angstroms, boxlz*angstroms)
+#    return psf
 
 def gen_box(psf, crd):
     coords = crd.positions
@@ -299,7 +299,118 @@ def gen_box(psf, crd):
     psf.setBox(boxlx, boxly, boxlz)
     return psf
 
+def gen_box(psf, crd):
+    """
+    Generates and sets box dimensions based on the minimum and maximum coordinates from a coordinate file.
+
+    This function computes the bounding box dimensions of a molecular system by determining
+    the minimum and maximum coordinates from the given coordinate data (`crd`), and then sets
+    the box dimensions for the `psf` (Protein Structure File) object.
+
+    Parameters
+    ----------
+    psf : CharmmPsfFile or similar
+        The PSF object whose box dimensions will be set.
+    crd : CharmmCrdFile, AmberInpcrdFile, or similar
+        The coordinate file object containing atomic positions.
+        The object should have a `positions` attribute that provides atomic coordinates.
+
+    Returns
+    -------
+    psf : CharmmPsfFile or similar
+        The PSF object with the computed box dimensions set.
+
+    Raises
+    ------
+    AttributeError
+        If the `crd` object does not have a `positions` attribute.
+    ValueError
+        If the coordinate data is empty or the dimensions cannot be computed.
+
+    Notes
+    -----
+    - The box dimensions are calculated by determining the minimum and maximum
+      x, y, and z coordinates across all atoms in the system.
+    - `psf.setBox()` should be a valid method to apply the box dimensions.
+    - The units of the box dimensions are assumed to be consistent with the input coordinates.
+
+    Example
+    -------
+    psf = CharmmPsfFile('input.psf')
+    crd = CharmmCrdFile('input.crd')
+    psf = gen_box(psf, crd)
+    print(psf.boxLengths)  
+    """
+    # Check if the crd object has a 'positions' attribute
+    if not hasattr(crd, 'positions'):
+        raise AttributeError("The coordinate object does not have a 'positions' attribute.")
+
+    coords = crd.positions
+
+    # Check if the coordinate list is non-empty
+    if len(coords) == 0:
+        raise ValueError("The coordinate data is empty. Cannot generate box dimensions.")
+
+    # Initialize min and max coordinates with the first atom's coordinates
+    min_crds = [coords[0][0], coords[0][1], coords[0][2]]
+    max_crds = [coords[0][0], coords[0][1], coords[0][2]]
+
+    # Iterate through all coordinates to compute min and max bounds
+    for coord in coords:
+        min_crds[0] = min(min_crds[0], coord[0])
+        min_crds[1] = min(min_crds[1], coord[1])
+        min_crds[2] = min(min_crds[2], coord[2])
+        max_crds[0] = max(max_crds[0], coord[0])
+        max_crds[1] = max(max_crds[1], coord[1])
+        max_crds[2] = max(max_crds[2], coord[2])
+
+    # Calculate the box dimensions
+    boxlx = max_crds[0] - min_crds[0]
+    boxly = max_crds[1] - min_crds[1]
+    boxlz = max_crds[2] - min_crds[2]
+
+    # Set the box dimensions in the PSF object
+    psf.setBox(boxlx, boxly, boxlz)
+    return psf
+
 def rewrap(simulation):
+    """
+    Rewraps molecular coordinates in a periodic simulation box to ensure bonded atoms remain close together.
+
+    This function analyzes the positions of atoms in a periodic box, detects bonds that cross the box boundaries,
+    and translates the atoms in the residue of the second bonded atom (`res2`) to keep it close to the first atom (`res1`).
+    This process ensures that molecules remain wrapped properly inside the periodic simulation box.
+
+    Parameters
+    ----------
+    simulation :
+        The OpenMM simulation object that contains:
+        - The topology with bond information.
+        - The context that holds the current state and positions of the atoms.
+        - The periodic box vectors defining the simulation box dimensions.
+
+    Returns
+    -------
+    simulation : 
+        The updated simulation object with rewrapped atom positions.
+
+    Raises
+    ------
+    ValueError
+        If no bonds are found in the topology or positions cannot be retrieved properly.
+
+    Notes
+    -----
+    - Periodic boundary conditions can lead to atoms in bonded residues appearing on opposite sides of the box.
+    - This function rewraps such atoms to keep bonded residues close together.
+    - It calculates the center of the system and uses box dimensions to correct atomic positions.
+
+    Example
+    -------
+    simulation = Simulation(topology, system, integrator)
+    simulation.context.setPositions(initial_positions)
+    simulation = rewrap(simulation)
+    """
     bonds = simulation.topology.bonds()
     positions = simulation.context.getState(getPositions=True).getPositions()
     box = simulation.context.getState().getPeriodicBoxVectors()
@@ -356,37 +467,192 @@ def rewrap(simulation):
     return simulation
 
 def set_compute_system(platform):
-    DEFAULT_PLATFORMS = 'CUDA', 'OpenCL', 'CPU' 
-    enabled_platforms = [Platform.getPlatform(i).getName() for i in range(Platform.getNumPlatforms())] 
+    """
+    Selects and configures the appropriate OpenMM compute platform based on user input or available platforms.
+
+    This function checks the available platforms in the OpenMM installation and either uses the
+    specified platform or defaults to the best available platform in a predefined order (`CUDA`, `OpenCL`, `CPU`).
+    It also configures platform properties (such as `CudaPrecision`) if applicable.
+
+    Parameters
+    ----------
+    platform : str or None
+        The name of the desired OpenMM platform.
+        - If `platform` is provided, the function tries to use that platform.
+        - If `platform` is `None`, the function selects the first available platform from the
+          list `['CUDA', 'OpenCL', 'CPU']` in that order.
+
+    Returns
+    -------
+    list
+        A list containing:
+        - platform (Platform) : The selected OpenMM platform.
+        - prop (dict) : A dictionary of platform-specific properties.
+          - For CUDA, the property `CudaPrecision` is set to `single`.
+          - For other platforms, an empty dictionary is returned.
+
+    Raises
+    ------
+    SystemExit
+        If the specified platform is not available or no valid platform is found.
+
+    Notes
+    -----
+    - CUDA is preferred over OpenCL and CPU if available, providing better performance.
+    - If `platform` is specified but not found, the program exits with an error message.
+    - If no valid platform is found when `platform` is `None`, the program exits with an error message.
+
+    Example
+    -------
+    platform, prop = set_compute_system('CUDA')
+    Using platform: CUDA
+
+    platform, prop = set_compute_system(None)
+    Using platform: CUDA
+    """
+
+    DEFAULT_PLATFORMS = 'CUDA', 'OpenCL', 'CPU'
+    # Get the list of available platforms
+    enabled_platforms = [Platform.getPlatform(i).getName() for i in range(Platform.getNumPlatforms())]
     print(enabled_platforms)
+
+    # If a platform is specified, try to use it
     if platform:
-        if not platform in enabled_platforms:
+        if platform not in enabled_platforms:
             print("Unable to find OpenMM platform '{}'; exiting".format(platform), file=sys.stderr)
             sys.exit(1)
         platform = Platform.getPlatformByName(platform)
     else:
+        # Attempt to use the best available platform in the preferred order
         for platform in DEFAULT_PLATFORMS:
             if platform in enabled_platforms:
                 platform = Platform.getPlatformByName(platform)
                 break
+        # If no valid platform was found, exit
         if isinstance(platform, str):
-            print("Unable to find any OpenMM platform; exiting".format(platform), file=sys.stderr)
+            print("Unable to find any OpenMM platform; exiting", file=sys.stderr)
             sys.exit(1)
+
     print("Using platform:", platform.getName())
+    
+    # Set platform-specific properties if needed
     prop = dict(CudaPrecision='single') if platform.getName() == 'CUDA' else dict()
-    return [platform,prop]
+    return [platform, prop]
 
 def save_simulation_results(simulation, output_pdb, state_xml, system_xml):
+    """
+    Saves the results of an OpenMM simulation, including atom positions, system state, and system configuration.
+
+    This function extracts the current state of the simulation and writes the results to:
+    - A PDB file containing atom positions.
+    - An XML file containing the state information.
+    - An XML file containing the system definition.
+
+    Parameters
+    ----------
+    simulation : 
+        The OpenMM simulation object containing the topology, system, and current state.
+    output_pdb : str or Path
+        Path to the output PDB file where the atomic positions will be saved.
+    state_xml : str or Path
+        Path to the output XML file where the simulation state (positions, velocities, and forces) will be saved.
+    system_xml : str or Path
+        Path to the output XML file where the system configuration (forces, particles, constraints, etc.) will be saved.
+
+    Returns
+    -------
+    None
+        The function writes the simulation results to the specified files and does not return any value.
+
+    Notes
+    -----
+    - The simulation state includes information such as positions, velocities, forces, energy, and parameter values.
+    - The resulting PDB file is human-readable and can be visualized with molecular visualization tools.
+    - The XML files provide detailed descriptions of the system and state, which can be used to restart or analyze the simulation.
+
+    Example
+    -------
+    simulation = Simulation(topology, system, integrator)
+    simulation.step(1000)  # Run 1000 steps of the simulation
+    save_simulation_results(simulation, 'output.pdb', 'state.xml', 'system.xml')
+    Saving results...
+    """
+
     print("saving results")
-    state = simulation.context.getState(getPositions=True, getVelocities=True, getForces=True, getEnergy=True, getParameters=True, enforcePeriodicBox=True)
+
+    # Extract the current state with positions, velocities, forces, and energies
+    state = simulation.context.getState(
+        getPositions=True,
+        getVelocities=True,
+        getForces=True,
+        getEnergy=True,
+        getParameters=True,
+        enforcePeriodicBox=True
+    )
+
+    # Save positions to a PDB file
     with open(str(output_pdb), 'w') as f:
         PDBFile.writeFile(simulation.topology, state.getPositions(), f)
+
+    # Save the state to an XML file
     with open(str(state_xml), 'w') as f:
         f.write(XmlSerializer.serialize(state))
+
+    # Save the system to an XML file
     with open(str(system_xml), 'w') as f:
         f.write(XmlSerializer.serialize(simulation.system))
 
+
 def read_simulation_result(state_xml,system_xml):
+    """
+    Reads and deserializes the system and state information from XML files.
+
+    This function loads a previously saved OpenMM system and state from XML files,
+    allowing for the recreation of a simulation's configuration and state.
+
+    Parameters
+    ----------
+    state_xml : str or Path
+        Path to the XML file containing the serialized state information.
+        The state file typically contains details about positions, velocities, forces,
+        and system parameters at a specific simulation step.
+    system_xml : str or Path
+        Path to the XML file containing the serialized system information.
+        The system file includes details such as particles, forces, constraints, and 
+        other system definitions.
+
+    Returns
+    -------
+    list
+        A list containing:
+        - system : openmm.System
+            The deserialized OpenMM system.
+        - state : openmm.State
+            The deserialized OpenMM state.
+
+    Raises
+    ------
+    FileNotFoundError
+        If either the `state_xml` or `system_xml` file is not found.
+    IOError
+        If the files cannot be read due to permission or other I/O issues.
+    ValueError
+        If the XML files are corrupted or cannot be deserialized.
+
+    Notes
+    -----
+    - Deserialization of the XML files restores the system and state objects,
+      which can be used to restart a simulation from a specific state.
+    - `XmlSerializer.deserialize()` is used to read and deserialize the XML content.
+    
+    Example
+    -------
+    system, state = read_simulation_result('state.xml', 'system.xml')
+    print(system.getNumParticles())
+    output: 1000
+    print(state.getTime())
+    output: 50.0 ps
+    """    
     with open(str(system_xml), 'r') as f:
         system = XmlSerializer.deserialize(f.read())
     with open(str(state_xml), 'r') as f:
@@ -394,6 +660,45 @@ def read_simulation_result(state_xml,system_xml):
     return [system, state]
 
 def energy_minimization(modeller, system, platform, prop):
+    """
+    Performs energy minimization on a molecular system using OpenMM.
+
+    This function sets up a simulation with a Langevin integrator and performs energy
+    minimization to relax the system and remove any steric clashes.
+
+    Parameters
+    ----------
+    modeller : 
+        The Modeller object containing the system topology and initial atomic positions.
+    system : 
+        The OpenMM System object defining the forces and constraints of the system.
+    platform : 
+        The OpenMM platform used to run the simulation (e.g., CUDA, OpenCL, CPU).
+    prop : dict
+        Platform-specific properties, such as `CudaPrecision` for CUDA.
+
+    Returns
+    -------
+    simulation : openmm.app.Simulation
+        The Simulation object after energy minimization, with updated atomic positions.
+
+    Notes
+    -----
+    - The integrator used is `LangevinMiddleIntegrator` with:
+      - Temperature: 300 K
+      - Friction coefficient: 1/picosecond
+      - Time step: 2 fs (0.002 picoseconds)
+    - `simulation.minimizeEnergy()` uses OpenMM's default energy minimization method.
+    - The resulting `simulation` can be further used to perform dynamics or save results.
+
+    Example
+    -------
+    modeller = Modeller(topology, positions)
+    system = forcefield.createSystem(modeller.topology)
+    simulation = energy_minimization(modeller, system, platform, {'CudaPrecision': 'single'})
+    state = simulation.context.getState(getPositions=True)
+    minimized_positions = state.getPositions(asNumpy=True)
+    """    
     integrator = LangevinMiddleIntegrator(300*kelvin, 1/picosecond, 0.002*picoseconds)
     simulation = Simulation(modeller.topology, system, integrator, platform, prop)
     simulation.context.setPositions(modeller.positions)
@@ -401,6 +706,51 @@ def energy_minimization(modeller, system, platform, prop):
     return simulation
 
 def charmm_energy_minimization(psffile, crdfile, system, platform, prop):
+    """
+    Performs energy minimization for a CHARMM system using OpenMM.
+
+    This function sets up a simulation for a system defined by a CHARMM PSF file and
+    a coordinate (CRD) file, and performs energy minimization to eliminate steric clashes
+    and bring the system to a local energy minimum.
+
+    Parameters
+    ----------
+    psffile : openmm.app.CharmmPsfFile
+        The CHARMM PSF (Protein Structure File) containing the system topology.
+    crdfile : openmm.app.CharmmCrdFile
+        The CHARMM CRD (Coordinate File) containing initial atomic positions.
+    system : openmm.System
+        The OpenMM System object that defines the forces and constraints of the system.
+    platform : openmm.Platform
+        The OpenMM platform used to run the simulation (e.g., CUDA, OpenCL, CPU).
+    prop : dict
+        Platform-specific properties, such as `CudaPrecision` for CUDA.
+
+    Returns
+    -------
+    simulation : openmm.app.Simulation
+        The Simulation object after energy minimization, with updated atomic positions.
+
+    Notes
+    -----
+    - The integrator used is `LangevinMiddleIntegrator` with:
+      - Temperature: 300 K
+      - Friction coefficient: 1/picosecond
+      - Time step: 2 fs (0.002 picoseconds)
+    - `simulation.minimizeEnergy()` minimizes the system energy using OpenMM's default
+      energy minimization algorithm.
+    - The resulting `simulation` object can be used for further simulations or analysis.
+
+    Example
+    -------
+    from openmm.app import CharmmPsfFile, CharmmCrdFile
+    psf = CharmmPsfFile('input.psf')
+    crd = CharmmCrdFile('input.crd')
+    system = forcefield.createSystem(psf.topology)
+    simulation = charmm_energy_minimization(psf, crd, system, platform, {'CudaPrecision': 'single'})
+    state = simulation.context.getState(getPositions=True)
+    minimized_positions = state.getPositions(asNumpy=True)
+    """
     integrator = LangevinMiddleIntegrator(300*kelvin, 1/picosecond, 0.002*picoseconds)
     simulation = Simulation(psffile.topology, system, integrator, platform, prop)
     simulation.context.setPositions(crdfile.positions)
@@ -409,6 +759,62 @@ def charmm_energy_minimization(psffile, crdfile, system, platform, prop):
 
 
 def sim_context(pdb, system, state, store_report_interval, nsteps, dcd_filename, platform, prop, append_bool=False):
+    """
+    Runs a molecular dynamics (MD) simulation in OpenMM using a given initial state.
+
+    This function initializes a simulation context using a provided PDB structure, system definition,
+    and state. It sets up a Langevin integrator and appends reporters to monitor and save simulation
+    data, including a DCD trajectory, state information, and checkpoint files. The simulation is run
+    for a specified number of steps.
+
+    Parameters
+    ----------
+    pdb : PDBFile
+        The PDB file containing the initial atomic positions and topology information.
+    system : System
+        The OpenMM System object defining the forces, constraints, and particles of the system.
+    state : State
+        The initial state of the system, containing positions, velocities, and box dimensions.
+    store_report_interval : int
+        Interval (in steps) at which simulation data is written to output files.
+    nsteps : int
+        The total number of simulation steps to be performed.
+    dcd_filename : str
+        Name of the output DCD file where atomic positions will be stored.
+    platform : Platform
+        The OpenMM platform used to run the simulation (e.g., CUDA, OpenCL, CPU).
+    prop : dict
+        Platform-specific properties, such as `CudaPrecision` for CUDA.
+    append_bool : bool, optional
+        Whether to append data to an existing DCD file. Defaults to `False`.
+
+    Returns
+    -------
+    simulation : openmm.app.Simulation
+        The Simulation object after running the specified number of steps, with updated atomic positions.
+
+    Notes
+    -----
+    - The integrator used is `LangevinMiddleIntegrator` with:
+      - Temperature: 300 K
+      - Friction coefficient: 1/picosecond
+      - Time step: 2 fs (0.002 picoseconds)
+    - The simulation writes:
+        - Trajectories to a DCD file (`{dcd_filename}.dcd`).
+        - Simulation state information (energy and temperature) to `stdout` at regular intervals.
+        - Checkpoints to `checkpoint.chk` every 200 steps.
+    - The resulting `simulation` object can be used to extract state information or extend the simulation.
+
+    Example
+    -------
+    from openmm.app import PDBFile
+    pdb = PDBFile('input.pdb')
+    system = forcefield.createSystem(pdb.topology)
+    simulation = sim_context(pdb, system, state, 1000, 50000, 'output', platform, {'CudaPrecision': 'single'})
+    state = simulation.context.getState(getPositions=True)
+    positions = state.getPositions(asNumpy=True)
+    """
+
     integrator = LangevinMiddleIntegrator(300*kelvin, 1/picosecond, 0.002*picoseconds)
     simulation = Simulation(pdb.topology, system, integrator, platform, prop)
     simulation.context.setState(state)
@@ -420,23 +826,245 @@ def sim_context(pdb, system, state, store_report_interval, nsteps, dcd_filename,
     return simulation
 
 def nvt_run(pdb, system, state, store_report_interval, nsteps, dcd_filename, platform, prop, append_bool):
+    """
+    Runs an NVT (constant number of particles, volume, and temperature) simulation using OpenMM.
+
+    This function serves as a wrapper for `sim_context` to run a molecular dynamics simulation
+    under NVT conditions with a given system, initial state, and specified simulation parameters.
+
+    Parameters
+    ----------
+    pdb : openmm.app.PDBFile
+        The PDB file containing the initial atomic positions and topology information.
+    system : openmm.System
+        The OpenMM System object defining the forces, constraints, and particles of the system.
+    state : openmm.State
+        The initial state of the system, containing positions, velocities, and box dimensions.
+    store_report_interval : int
+        Interval (in steps) at which simulation data is written to output files.
+    nsteps : int
+        The total number of simulation steps to be performed.
+    dcd_filename : str
+        Name of the output DCD file where atomic positions will be stored.
+    platform : openmm.Platform
+        The OpenMM platform used to run the simulation (e.g., CUDA, OpenCL, CPU).
+    prop : dict
+        Platform-specific properties, such as `CudaPrecision` for CUDA.
+    append_bool : bool
+        Whether to append data to an existing DCD file.
+
+    Returns
+    -------
+    simulation : openmm.app.Simulation
+        The Simulation object after running the specified number of steps, with updated atomic positions.
+
+    Notes
+    -----
+    - This function uses `sim_context` to set up and run the simulation.
+    - NVT conditions are maintained by using a Langevin integrator with:
+      - Constant temperature (300 K).
+      - Constant volume (no barostat applied).
+    - The resulting `simulation` object can be used for further analysis or continuation.
+
+    Example
+    -------
+    from openmm.app import PDBFile
+    pdb = PDBFile('input.pdb')
+    system = forcefield.createSystem(pdb.topology)
+    simulation = nvt_run(pdb, system, state, 1000, 50000, 'output', platform, {'CudaPrecision': 'single'}, False)
+    state = simulation.context.getState(getPositions=True)
+    positions = state.getPositions(asNumpy=True)
+    """
     return sim_context(pdb, system, state, store_report_interval, nsteps, dcd_filename, platform, prop, append_bool)
 
 def npt_run(pdb, system, state, store_report_interval, nsteps, dcd_filename, platform, prop, append_bool):
+    """
+    Runs an NPT (constant number of particles, pressure, and temperature) simulation using OpenMM.
+
+    This function modifies the given system to include a Monte Carlo barostat to maintain constant
+    pressure and temperature, and then calls `sim_context` to run the simulation under NPT conditions.
+
+    Parameters
+    ----------
+    pdb : openmm.app.PDBFile
+        The PDB file containing the initial atomic positions and topology information.
+    system : openmm.System
+        The OpenMM System object defining the forces, constraints, and particles of the system.
+    state : openmm.State
+        The initial state of the system, containing positions, velocities, and box dimensions.
+    store_report_interval : int
+        Interval (in steps) at which simulation data is written to output files.
+    nsteps : int
+        The total number of simulation steps to be performed.
+    dcd_filename : str
+        Name of the output DCD file where atomic positions will be stored.
+    platform : openmm.Platform
+        The OpenMM platform used to run the simulation (e.g., CUDA, OpenCL, CPU).
+    prop : dict
+        Platform-specific properties, such as `CudaPrecision` for CUDA.
+    append_bool : bool
+        Whether to append data to an existing DCD file.
+
+    Returns
+    -------
+    simulation : openmm.app.Simulation
+        The Simulation object after running the specified number of steps, with updated atomic positions.
+
+    Notes
+    -----
+    - A `MonteCarloBarostat` is added to the system to maintain constant pressure and temperature:
+      - Pressure: 1 bar
+      - Temperature: 300 K
+    - This function uses `sim_context` to set up and run the simulation.
+    - The resulting `simulation` object can be used for further analysis or continuation.
+
+    Example
+    -------
+    from openmm.app import PDBFile
+    pdb = PDBFile('input.pdb')
+    system = forcefield.createSystem(pdb.topology)
+    simulation = npt_run(pdb, system, state, 1000, 50000, 'output', platform, {'CudaPrecision': 'single'}, False)
+    state = simulation.context.getState(getPositions=True)
+    positions = state.getPositions(asNumpy=True)
+    """
     system.addForce(MonteCarloBarostat(1*bar, 300*kelvin))
     return sim_context(pdb, system, state, store_report_interval, nsteps, dcd_filename, platform, prop, append_bool)
 
 def initialize_forcefield(solvent=True):
+    """
+    Initializes an AMBER14 force field for a molecular system with or without explicit solvent.
+
+    This function loads the appropriate force field XML files from the AMBER14 package based on
+    whether the system is solvated or not.
+
+    Parameters
+    ----------
+    solvent : bool, optional
+        If `True` (default), the system includes explicit solvent and the TIP3P water model is loaded.
+        If `False`, only the protein force field is used without solvent.
+
+    Returns
+    -------
+    forcefield : openmm.app.ForceField
+        The initialized ForceField object containing the relevant force field parameters.
+
+    Notes
+    -----
+    - The `amber14/protein.ff14SB.xml` file defines the force field parameters for proteins.
+    - The `amber14/tip3p.xml` file defines the TIP3P water model for explicit solvation.
+    - When `solvent` is set to `False`, only the protein force field is applied.
+
+    Example
+    -------
+    ff = initialize_forcefield(solvent=True)
+    print(ff.getGenerators())
+    """    
     if solvent:
         return ForceField('amber14/protein.ff14SB.xml', 'amber14/tip3p.xml')
     return ForceField('amber14/protein.ff14SB.xml')
 
 def create_system(modeller, forcefield, solvent=True):
+    """
+    Creates an OpenMM System from a Modeller object and a specified force field.
+
+    This function generates a System object that defines the interactions and constraints
+    for a molecular system. It applies different settings for nonbonded interactions based on
+    whether the system is solvated or not.
+
+    Parameters
+    ----------
+    modeller : openmm.app.Modeller
+        The Modeller object containing the system topology and atomic positions.
+    forcefield : openmm.app.ForceField
+        The ForceField object containing the parameters for the system.
+    solvent : bool, optional
+        If `True` (default), the system is treated as solvated and uses PME for nonbonded
+        interactions with periodic boundary conditions.
+        If `False`, the system is treated as non-solvated, using a cutoff for nonbonded
+        interactions without periodic boundary conditions.
+
+    Returns
+    -------
+    system : openmm.System
+        The generated System object that defines the particles, forces, and constraints
+        for the molecular system.
+
+    Notes
+    -----
+    - For solvated systems (`solvent=True`):
+        - Nonbonded method: PME (Particle Mesh Ewald)
+        - Nonbonded cutoff: 1 nm
+        - Constraints: HBonds
+    - For non-solvated systems (`solvent=False`):
+        - Nonbonded method: CutoffNonPeriodic
+        - Nonbonded cutoff: 1 nm
+        - Constraints: HBonds
+
+    Example
+    -------
+    modeller = Modeller(topology, positions)
+    forcefield = ForceField('amber14/protein.ff14SB.xml', 'amber14/tip3p.xml')
+    system = create_system(modeller, forcefield, solvent=True)
+    print(system.getNumParticles())
+    """
     if solvent:
         return forcefield.createSystem(modeller.topology, nonbondedMethod=PME, nonbondedCutoff=1*nanometer, constraints=HBonds)
     return forcefield.createSystem(modeller.topology, nonbondedMethod=CutoffNonPeriodic, nonbondedCutoff=1*nanometer, constraints=HBonds)
 
 def run_simulation(pdb, system, state, run_type, remaining_steps, output_prefix, platform, prop, restart):
+    """
+    Runs a molecular dynamics (MD) simulation in either NVT or NPT ensemble using OpenMM.
+
+    This function selects and runs the appropriate simulation type (`nvt` or `npt`)
+    based on the `run_type` parameter. It initializes and runs the simulation for a specified
+    number of steps, saving the results to output files with a specified prefix.
+
+    Parameters
+    ----------
+    pdb : openmm.app.PDBFile
+        The PDB file containing the initial atomic positions and topology information.
+    system : openmm.System
+        The OpenMM System object defining the forces, constraints, and particles of the system.
+    state : openmm.State
+        The initial state of the system, containing positions, velocities, and box dimensions.
+    run_type : str
+        Type of simulation to run. Accepted values:
+        - "nvt" : Constant Number of Particles, Volume, and Temperature.
+        - "npt" : Constant Number of Particles, Pressure, and Temperature.
+    remaining_steps : int
+        The total number of simulation steps to be performed.
+    output_prefix : str
+        Prefix used to name the output files (DCD trajectory and state information).
+    platform : openmm.Platform
+        The OpenMM platform used to run the simulation (e.g., CUDA, OpenCL, CPU).
+    prop : dict
+        Platform-specific properties, such as `CudaPrecision` for CUDA.
+    restart : bool
+        Whether to append simulation data to an existing DCD file if continuing a previous simulation.
+
+    Returns
+    -------
+    simulation : Simulation
+        The Simulation object after running the specified number of steps, with updated atomic positions.
+
+    Raises
+    ------
+    ValueError
+        If `run_type` is not one of the accepted values (`"nvt"` or `"npt"`).
+
+    Notes
+    -----
+    - `nvt_run()` runs the simulation in an NVT ensemble.
+    - `npt_run()` runs the simulation in an NPT ensemble.
+    - The resulting `simulation` object can be used to extract state information or continue the simulation.
+
+    Example
+    -------
+    pdb = PDBFile('input.pdb')
+    system = forcefield.createSystem(pdb.topology)
+    simulation = run_simulation(pdb, system, state, 'nvt', 50000, 'output', platform, {'CudaPrecision': 'single'}, False)
+    state = simulation.context.getState(getPositions=True)
+    """
     if run_type == "nvt":
         return nvt_run(pdb, system, state, equil_store_report_interval, remaining_steps, output_prefix, platform, prop, restart)
     elif run_type == "npt":
